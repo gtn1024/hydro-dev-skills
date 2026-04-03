@@ -1,6 +1,6 @@
 ---
 name: hydro-plugin-overview
-description: Covers Hydro plugin fundamentals including entry functions (apply vs Service class), import conventions, plugin package structure, and complete minimal working examples. Essential for understanding plugin basics.
+description: Hydro plugin fundamentals including entry functions (apply vs Service class), import conventions, plugin package structure, database access (ctx.db and deprecated db), management scripts (ctx.addScript), and a complete minimal working example.
 ---
 
 # Hydro Plugin Development: Overview & Fundamentals
@@ -265,7 +265,142 @@ And the corresponding template `templates/blog_main.html`:
 
 ---
 
-## 5. Key Concepts Summary
+## 5. Database Access (`ctx.db` / `db`)
+
+The `db` service provides MongoDB access. There are two ways to use it:
+
+### Via `ctx.db` (recommended)
+
+Available as `this.ctx.db` in handlers or `ctx.db` in services:
+
+```typescript
+// Get a typed collection reference
+ctx.db.collection<K extends keyof Collections>(name: K): Collection<Collections[K]>
+
+// Pagination — returns [docs, numPages, totalCount]
+const [docs, numPages, count] = await ctx.db.paginate(cursor, page, pageSize);
+
+// Ranked pagination (with equal-rank grouping)
+const [ranked, docs] = await ctx.db.ranked(cursor, (a, b) => a.score === b.score);
+
+// Index management
+await ctx.db.ensureIndexes(collection, ...indexDescriptions);
+await ctx.db.clearIndexes(collection, dropIndexNames?);
+```
+
+### Via `import { db } from 'hydrooj'` (deprecated but widely used)
+
+```typescript
+import { db } from 'hydrooj';
+
+// db is a Proxy that forwards all property access to app.get('db')
+// So you can use it anywhere without a context:
+const coll = db.collection('user');
+const docs = await coll.find({}).toArray();
+```
+
+> **Note**: This `db` export is marked `@deprecated` — it accesses the MongoService via a global proxy (`app.get('db')`). Despite being deprecated, it is still widely used throughout the Hydro ecosystem and all existing plugins. Prefer `ctx.db` in new code, but you will encounter `db` frequently in existing codebases.
+
+### Accessing raw MongoDB
+
+```typescript
+// Via ctx.db
+ctx.db.client  // MongoClient instance
+ctx.db.db      // native Db instance (from mongodb package)
+
+// Via deprecated import
+db.client
+db.db
+```
+
+### Common patterns
+
+```typescript
+// Paginated query in a handler
+const [items, pageCount, count] = await this.ctx.db.paginate(
+    MyModel.getMulti(domainId, { status: 'active' }),
+    page,
+    20,
+);
+
+// Using deprecated db import in a model
+import { db } from 'hydrooj';
+const coll = db.collection('my_collection');
+await coll.updateOne({ _id: oid }, { $set: { field: value } });
+```
+
+---
+
+## 6. Management Scripts (`ctx.addScript`)
+
+Scripts appear in the **System Control Panel → Scripts** page. They are admin-only tools for batch operations, data migration, or maintenance tasks.
+
+### Registration
+
+```typescript
+ctx.addScript(
+    name: string,          // Unique script identifier
+    description: string,   // Human-readable description shown in UI
+    validate: Schema<T>,   // Schemastery schema for script arguments
+    run: (args: T, report: (msg: string) => void) => boolean | Promise<boolean>,
+);
+```
+
+The `run` callback receives:
+- `args` — validated input matching the schema
+- `report` — progress callback, shows messages in the UI during execution
+
+Return `true` to indicate success, or throw an error for failure.
+
+### Example: batch cleanup script
+
+```typescript
+import { Context, Schema, iterateAllProblem } from 'hydrooj';
+
+export async function apply(ctx: Context) {
+    ctx.addScript('clean_orphan_data', 'Remove orphan data from problems',
+        Schema.object({
+            dryRun: Schema.boolean().default(true).description('Only report, do not delete'),
+        }),
+        async (args, report) => {
+            let count = 0;
+            await iterateAllProblem(['domainId', 'docId', 'title'], async (pdoc, i, total) => {
+                if (i % 100 === 0) report(`Processing ${i}/${total}...`);
+                const hasOrphan = checkOrphan(pdoc);
+                if (hasOrphan) {
+                    count++;
+                    if (!args.dryRun) await cleanupOrphan(pdoc);
+                }
+            });
+            report(`Found ${count} problems with orphan data`);
+            return true;
+        },
+    );
+}
+```
+
+### Built-in iteration helpers (from `hydrooj`)
+
+```typescript
+import { iterateAllDomain, iterateAllUser, iterateAllContest,
+         iterateAllProblem, iterateAllRecord, iterateAllPsdoc } from 'hydrooj';
+
+// Iterate all domains
+await iterateAllDomain(async (ddoc, current?, total?) => { ... });
+
+// Iterate all users
+await iterateAllUser(async (udoc, current?, total?) => { ... });
+
+// Iterate all problems across all domains
+await iterateAllProblem(['title', 'content'], async (pdoc, current?, total?) => {
+    // Return a partial update to auto-apply changes:
+    return { title: pdoc.title.trim() };
+});
+```
+
+---
+
+## 7. Key Concepts Summary
 
 | Concept | API | Purpose |
 |---------|-----|---------|
@@ -274,9 +409,10 @@ And the corresponding template `templates/blog_main.html`:
 | Events | `ctx.on(event, handler)` | React to system events |
 | UI Injection | `ctx.injectUI(position, name, args, ...perms)` | Add UI elements |
 | Modules | `ctx.provideModule(type, id, impl)` | Register replaceable modules |
+| Scripts | `ctx.addScript(name, desc, schema, run)` | Admin batch operations |
 | Config | `static Config = Schema.object({...})` | Plugin settings |
 | i18n | `ctx.i18n.load(lang, dict)` | Translations |
-| DB Extension | `declare module 'hydrooj' { interface Collections {...} }` | Add collections/fields |
+| DB Access | `ctx.db.collection()`, `ctx.db.paginate()` | MongoDB operations |
 | Templates | `templates/*.html` directory | Nunjucks server-rendered HTML |
 
-See also: `hydro-plugin-handler` for routes/handlers, `hydro-plugin-hooks` for events, `hydro-plugin-frontend` for templates/UI/i18n.
+See also: `hydro-plugin-handler` for routes/handlers, `hydro-plugin-hooks` for events, `hydro-plugin-frontend` for templates/UI/i18n, `hydro-plugin-services` for storage/settings/oauth.

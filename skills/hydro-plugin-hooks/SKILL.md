@@ -1,6 +1,6 @@
 ---
 name: hydro-plugin-hooks
-description: Complete reference to Hydro's event system including event API, cluster-safe broadcasting, 60+ event types, resource cleanup (ctx.effect), scheduled tasks (ctx.interval), and replaceable modules (ctx.provideModule).
+description: Complete reference to Hydro's event system including event API (ctx.on/emit/broadcast), cluster-safe broadcasting, 60+ event types, resource cleanup (ctx.effect), timed tasks (ctx.interval), and replaceable modules (ctx.provideModule).
 ---
 
 # Hydro Plugin Development: Event System & Hooks

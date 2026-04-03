@@ -1,6 +1,6 @@
 ---
 name: hydro-plugin-handler
-description: Comprehensive guide to HTTP request handling and WebSocket connections in Hydro plugins. Covers route registration, handler lifecycle, parameter decorators, response building, operations, WebSocket handlers, and inheritance patterns.
+description: Comprehensive guide to HTTP request handling and WebSocket connections in Hydro plugins. Covers route registration, handler lifecycle, parameter decorators, response building, operations, the @requireSudo security decorator, WebSocket handlers, and inheritance patterns.
 ---
 
 # Hydro Plugin Development: Handler & Route System
@@ -287,7 +287,62 @@ When the first argument name starts with `domainId` (case-insensitive), the fram
 
 ---
 
-## 5. Response Building
+## 5. Security Decorator: `@requireSudo`
+
+The `@requireSudo` decorator protects sensitive operations by requiring the user to re-authenticate (similar to Linux `sudo`). This prevents accidental destructive actions when a superadmin is logged in with "remember password" enabled.
+
+### How it works
+
+When applied to a handler method:
+1. Checks if `this.session.sudo` exists and is less than 1 hour old
+2. If valid sudo session → proceeds normally
+3. If no sudo session → saves current request state in `session.sudoArgs`, redirects to `/user/sudo` for password/2FA re-verification
+4. After verification, the user is redirected back and the original operation resumes
+
+### Usage
+
+```typescript
+import { requireSudo, Handler, param, Types, ObjectId } from 'hydrooj';
+
+class AdminSettingsHandler extends Handler {
+    @param('key', Types.String)
+    @param('value', Types.String)
+    @requireSudo
+    async postUpdate(domainId: string, key: string, value: string) {
+        // User must have re-authenticated within the last hour
+        await SystemModel.set(key, value);
+        this.back();
+    }
+}
+```
+
+### When to use `@requireSudo`
+
+- Superadmin account settings (password change, 2FA setup)
+- Destructive operations that should not be triggered by remembered sessions
+- Operations where a shared computer / classroom scenario could be exploited
+
+**IMPORTANT**: Teachers using superadmin accounts in classrooms is a key security concern. Always use `@requireSudo` for operations that could cause serious damage if an unauthorized person triggers them from a remembered session.
+
+### Session behavior
+
+```typescript
+// After successful sudo, the session stores:
+session.sudo = Date.now();              // Timestamp of sudo verification
+session.sudoArgs = {                     // Original request state saved before redirect
+    method: 'post',
+    referer: request.headers.referer,
+    args: this.args,
+    redirect: request.originalPath,
+};
+
+// Sudo session expires after 1 hour (Time.hour)
+// The stored referer is restored after sudo completes
+```
+
+---
+
+## 6. Response Building
 
 ### Render a template (HTML page)
 
@@ -382,7 +437,7 @@ this.response.set('X-Custom-Header', 'value');
 
 ---
 
-## 6. Handler Context Properties
+## 7. Handler Context Properties
 
 Every handler has access to these built-in properties:
 
@@ -416,7 +471,7 @@ this.translate('key');  // i18n translate
 
 ---
 
-## 7. The `after()` Method
+## 8. The `after()` Method
 
 The `after()` method runs after the main HTTP method handler and before the `handler/after` event hooks. It's commonly used for post-processing the response.
 
@@ -439,7 +494,7 @@ async after(domainId: string, tid: ObjectId) {
 
 ---
 
-## 8. WebSocket (ConnectionHandler)
+## 9. WebSocket (ConnectionHandler)
 
 WebSocket connections use `ConnectionHandler` instead of `Handler`.
 
@@ -507,7 +562,7 @@ ConnectionHandler also supports SSE when accessed via HTTP (not WebSocket upgrad
 
 ---
 
-## 9. Handler Inheritance Patterns
+## 10. Handler Inheritance Patterns
 
 Handlers support class inheritance for sharing logic:
 
@@ -556,7 +611,7 @@ Each layer uses `@param` decorators independently. The framework collects all `@
 
 ---
 
-## 10. Common Patterns
+## 11. Common Patterns
 
 ### CRUD Handler (combines GET + multiple POST operations)
 
