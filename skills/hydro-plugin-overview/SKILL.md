@@ -1,6 +1,6 @@
 ---
 name: hydro-plugin-overview
-description: Hydro plugin fundamentals including entry functions (apply vs Service class), import conventions, plugin package structure, database access (ctx.db and deprecated db), management scripts (ctx.addScript), and a complete minimal working example.
+description: Hydro plugin fundamentals including entry patterns (function-style apply, class-style Service, and mixed mode), import conventions, plugin package structure, database access (ctx.db and deprecated db), management scripts (ctx.addScript), and a complete minimal working example.
 ---
 
 # Hydro Plugin Development: Overview & Fundamentals
@@ -9,13 +9,11 @@ This skill covers the absolute basics of writing a Hydro plugin: the entry funct
 
 ---
 
-## 1. Plugin Entry: `apply(ctx: Context)`
+## 1. Plugin Entry
 
-Every Hydro plugin must export either:
-- An `apply(ctx: Context)` function (function-style, for simple plugins)
-- A class extending `Service` (class-style, for stateful plugins with config/dependencies)
+Every Hydro plugin must export one of:
 
-### Function-style (simple plugins)
+### Function-style (most common)
 
 ```typescript
 import { Context, Handler, param, Types, PRIV } from 'hydrooj';
@@ -35,17 +33,16 @@ export async function apply(ctx: Context) {
 }
 ```
 
-### Class-style (stateful plugins)
+The plugin loader detects a named `apply` export directly and uses it as the entry point.
+
+### Class-style (stateful plugins with config/dependencies)
 
 ```typescript
 import { Context, Service } from 'hydrooj';
 import Schema from 'schemastery';
 
 export default class MyService extends Service {
-    // Declare service dependencies (Cordis auto-resolves initialization order)
     static inject = ['db'];
-
-    // Declare configuration schema
     static Config = Schema.object({
         apiKey: Schema.string().required(),
         timeout: Schema.number().default(30),
@@ -53,22 +50,44 @@ export default class MyService extends Service {
 
     constructor(ctx: Context, config: ReturnType<typeof MyService.Config>) {
         super(ctx, 'myService');
-        // Access context via this.ctx
-        // Access validated config via config parameter
-        this.ctx.on('problem/add', (doc, docId) => {
-            // Use this.ctx for all plugin operations
-        });
+        this.ctx.on('problem/add', (doc, docId) => { });
     }
 }
 ```
 
-When using class-style, the `apply` function is implicitly the constructor — Cordis calls `ctx.plugin(MyService, config)` which instantiates the class.
+**Why this works without `apply`:** The plugin loader detects class constructors automatically. Cordis then instantiates the class via `ctx.plugin(MyService, config)`, calling the constructor with `(ctx, config)`.
+
+**Limitation:** Class-style alone cannot register routes, settings, or UI injections outside the constructor. For those, use the mixed pattern below.
+
+### Mixed style (class + apply, e.g. `geoip` package)
+
+Export both a class (as `default`) for service capabilities and a named `apply` for registration:
+
+```typescript
+import { Context, Service, Handler } from 'hydrooj';
+
+export default class GeoIPService extends Service {
+    constructor(ctx: Context) {
+        super(ctx, 'geoip');
+    }
+    lookup(ip: string, locale: string) { /* ... */ }
+}
+
+export function apply(ctx: Context) {
+    ctx.plugin(GeoIPService);
+    ctx.Route('geoip', '/api/geoip/:ip', GeoIPHandler);
+}
+```
+
+The loader prioritizes named `apply` as the entry point. Inside `apply`, you must call `ctx.plugin(GeoIPService)` to register the service instance. After that, other code can access it via `ctx.geoip` or dependency injection (`static inject = ['geoip']`).
+
+> **Note:** Class-style plugins do **not** need to define an `apply` method — the loader detects classes automatically. Function-style plugins **must** export a named `apply`. In the mixed style, `apply` takes priority as the entry point; use it to register routes/settings and let the class provide the service instance.
 
 ---
 
 ## 2. Import Conventions
 
-**ALWAYS import from `'hydrooj'`** — it is the unified public API surface. All public APIs are re-exported from `plugin-api.ts` inside the `hydrooj` package.
+**ALWAYS import from `'hydrooj'`** — it is the unified public API surface. All public APIs are re-exported from the `hydrooj` package.
 
 When developing a plugin as an external npm package, you install `hydrooj` as a dependency and import everything from it. You do NOT need access to the Hydro source repo — the `hydrooj` npm package contains all type definitions.
 
@@ -404,7 +423,7 @@ await iterateAllProblem(['title', 'content'], async (pdoc, current?, total?) => 
 
 | Concept | API | Purpose |
 |---------|-----|---------|
-| Entry | `apply(ctx)` or `default class extends Service` | Plugin bootstrap |
+| Entry | `export function apply(ctx)` or `export default class extends Service` or both | Plugin bootstrap |
 | Routes | `ctx.Route(name, path, Handler, ...perms)` | HTTP endpoints |
 | Events | `ctx.on(event, handler)` | React to system events |
 | UI Injection | `ctx.injectUI(position, name, args, ...perms)` | Add UI elements |
