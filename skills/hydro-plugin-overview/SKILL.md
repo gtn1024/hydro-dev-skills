@@ -109,7 +109,9 @@ import Handler from 'hydrooj/src/service/server';
 import { ObjectId } from 'hydrooj/src/model/basic';
 ```
 
-**Tip for AI assistants**: If you're unsure what's available from `hydrooj`, check `node_modules/hydrooj/dist/plugin-api.js` (or `.d.ts`) for the full list of exports. The key exported categories are:
+**Tip for AI assistants**: If you're unsure what's available from `hydrooj`, check `node_modules/hydrooj/dist/plugin-api.js` (or `.d.ts`) for the full list of exports. You can also find the API index at https://hydro-plugin-api-reference.pages.dev/llms.txt
+
+The key exported categories are:
 - Core: `Context`, `Service`, `Handler`, `ConnectionHandler`
 - Decorators: `param`, `get`, `post`, `route`, `query`, `subscribe`
 - Validation: `Types`
