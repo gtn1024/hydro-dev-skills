@@ -48,6 +48,8 @@ export default class MyPluginService extends Service {
 
 The `static Config` schema is automatically loaded by the Hydro Loader. Configuration values are read from the system config YAML stored in MongoDB, validated against the schema, and passed to the constructor.
 
+Important caveat: this constructor injection assumes the service class is the plugin entry. If the module also exports a named `apply`, then `apply` becomes the entry point. In that mixed style, export `Config` at the module level, accept `config` in `apply`, and forward it with `ctx.plugin(MyPluginService, config)` if you still want the service constructor to receive the resolved config.
+
 ### Reading system settings
 
 ```typescript

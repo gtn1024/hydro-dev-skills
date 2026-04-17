@@ -57,6 +57,8 @@ export default class MyService extends Service {
 
 **Why this works without `apply`:** The plugin loader detects class constructors automatically. Cordis then instantiates the class via `ctx.plugin(MyService, config)`, calling the constructor with `(ctx, config)`.
 
+**Important:** This automatic config injection only applies when the service class itself is the plugin entry. If you also export a named `apply`, then `apply` becomes the plugin entry instead of the default class.
+
 **Limitation:** Class-style alone cannot register routes, settings, or UI injections outside the constructor. For those, use the mixed pattern below.
 
 ### Mixed style (class + apply, e.g. `geoip` package)
@@ -81,7 +83,32 @@ export function apply(ctx: Context) {
 
 The loader prioritizes named `apply` as the entry point. Inside `apply`, you must call `ctx.plugin(GeoIPService)` to register the service instance. After that, other code can access it via `ctx.geoip` or dependency injection (`static inject = ['geoip']`).
 
-> **Note:** Class-style plugins do **not** need to define an `apply` method — the loader detects classes automatically. Function-style plugins **must** export a named `apply`. In the mixed style, `apply` takes priority as the entry point; use it to register routes/settings and let the class provide the service instance.
+If the mixed-style plugin needs config, export `Config` at the module level and accept `config` in `apply`. If `apply` then registers a service class, it must forward that config explicitly:
+
+```typescript
+import { Context, Schema, Service } from 'hydrooj';
+
+export const Config = Schema.object({
+    apiKey: Schema.string().required(),
+});
+
+export default class MyService extends Service {
+    static Config = Config;
+
+    constructor(ctx: Context, config: ReturnType<typeof Config>) {
+        super(ctx, 'myService');
+    }
+}
+
+export function apply(ctx: Context, config: ReturnType<typeof Config>) {
+    ctx.plugin(MyService, config);
+    ctx.Route('my_route', '/my', MyHandler);
+}
+```
+
+If you write `export function apply(ctx)` and then call `ctx.plugin(MyService)` without passing `config`, the loader-resolved config will stop at `apply` and never reach `MyService`.
+
+> **Note:** Class-style plugins do **not** need to define an `apply` method — the loader detects classes automatically. Function-style plugins **must** export a named `apply`. In the mixed style, `apply` takes priority as the entry point, so module-level `Config` and `apply(ctx, config)` are the safe pattern when configuration is involved.
 
 ---
 
@@ -425,7 +452,7 @@ await iterateAllProblem(['title', 'content'], async (pdoc, current?, total?) => 
 
 | Concept | API | Purpose |
 |---------|-----|---------|
-| Entry | `export function apply(ctx)` or `export default class extends Service` or both | Plugin bootstrap |
+| Entry | `export function apply(ctx, config?)` or `export default class extends Service` or both | Plugin bootstrap |
 | Routes | `ctx.Route(name, path, Handler, ...perms)` | HTTP endpoints |
 | Events | `ctx.on(event, handler)` | React to system events |
 | UI Injection | `ctx.injectUI(position, name, args, ...perms)` | Add UI elements |
