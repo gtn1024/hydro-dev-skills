@@ -85,6 +85,8 @@ addPage(new AutoloadPage('notificationPage', (pagename) => {
 }));
 ```
 
+AutoloadPage callbacks run on **every** page load and sit at the **front** of the load sequence (all autoload `beforeLoading` hooks run first). An `await` inside one taxes the entire site, not just the current page — keep AutoloadPage callbacks strictly synchronous (see "Async work in callbacks" below).
+
 ### Loading sequence
 
 Pages are executed in this order (see `hydro.ts`):
@@ -134,6 +136,61 @@ addPage(new NamedPage('problem_detail', {
     },
 }));
 ```
+
+#### Async work in callbacks — keep it out of the load sequence
+
+All page callbacks are awaited **sequentially** in `initPageLoader()` (see `hydro.ts`), and the `.page-loader` spinner only hides after every callback has finished. There is also a performance watchdog: a callback taking >16ms (dev) or >256ms (production) logs a `took Xms` warning. Callbacks are therefore meant to be **fast, synchronous initialization** — avoid awaiting anything slow inside them:
+
+- **Don't** `await` network requests (`request.get` / `request.post` / `fetch` etc.) or slow I/O in a callback. It blocks every other page's `beforeLoading` / `afterLoading` behind it and delays the whole page.
+- **OK**: `await import(...)` for heavy modules (editor, socket, echarts…). This is the standard way to keep them out of the main bundle. Put all imports at the top of the callback and run them in parallel with `Promise.all`.
+- **Prefer** real work in event handlers (`.on('click', ...)`, `setInterval`, …) where `await` is unrestricted, or fire-and-forget inside the callback: `someAsync().catch(...)`.
+
+```typescript
+import { addPage, NamedPage, request } from '@hydrooj/ui-default';
+
+addPage(new NamedPage('my_page', async () => {
+    // OK: dynamic imports first, in parallel
+    const [{ default: Editor }] = await Promise.all([
+        import('./editor'),
+    ]);
+    // sync DOM binding...
+    $('.my-btn').on('click', async () => {
+        // OK: awaited network calls belong in event handlers
+        await request.post('', { op: 'run' });
+    });
+}));
+```
+
+#### Bad examples — what NOT to do
+
+```javascript
+// BAD: network request in a callback — the whole load sequence (and the
+// .page-loader spinner) waits for this to resolve
+addPage(new NamedPage('my_page', async () => {
+    const data = await request.get('/api/slow');   // blocks every later callback
+    $('.my-widget').text(data);
+}));
+
+// BAD: same mistake in an AutoloadPage — this runs on EVERY page load,
+// so the entire site pays the latency, not just one page
+addPage(new AutoloadPage('my_feature', async () => {
+    await request.get('/api/whatever');            // blocks on every page
+}));
+
+// BAD: artificial delay awaited in a callback
+addPage(new AutoloadPage('my_feature', async () => {
+    await delay(500);                              // +500ms on every page load
+}));
+
+// GOOD: bind synchronously, update later (fire-and-forget)
+addPage(new AutoloadPage('my_feature', () => {
+    request.get('/api/whatever').then((data) => {
+        $('.my-widget').text(data);
+    }).catch((e) => Notification.error(e));
+}));
+```
+
+Also keep `addPage()` calls at module top level (synchronous module evaluation) — a top-level `await` in your plugin script delays registration and can race with page loader initialization.
 
 ### Available frontend utilities
 
